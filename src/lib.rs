@@ -461,7 +461,7 @@ struct Inner<Rng> {
 
 impl<Rng: TokenRng + SeedableRng> Default for Inner<Rng> {
     fn default() -> Self {
-        Self::with_rng(Rng::from_entropy())
+        Self::with_rng(Rng::from_os_rng())
     }
 }
 
@@ -632,34 +632,29 @@ mod tests {
             .map(|v| v.split(';').next().expect("split to work"))
             .collect();
         assert_eq!(1, cookie_header.len());
-        String::from(*cookie_header.get(0).expect("header to have cookie"))
+        String::from(*cookie_header.first().expect("header to have cookie"))
     }
 
     fn get_cookie_domain_from_resp(resp: &ServiceResponse) -> String {
-        let cookie_header: Vec<_> = resp
-            .headers()
+        resp.headers()
             .iter()
             .filter(|(header_name, _)| header_name.as_str() == "set-cookie")
             .map(|(_, value)| value.to_str().expect("header to be valid string"))
             .flat_map(|v| v.split(';'))
-            .collect();
-        String::from(
-            cookie_header
-                .into_iter()
-                .find_map(|s| s.trim().strip_prefix("Domain="))
-                .expect("header to have cookie"),
-        )
+            .find_map(|s| s.trim().strip_prefix("Domain="))
+            .expect("header to have cookie")
+            .into()
     }
 
     #[tokio::test]
     async fn attaches_token() {
-        let mut srv = test::init_service(
+        let srv = test::init_service(
             App::new()
                 .wrap(CsrfMiddleware::<StdRng>::new().set_cookie(Method::GET, "/"))
-                .service(web::resource("/").to(|| HttpResponse::Ok())),
+                .service(web::resource("/").to(HttpResponse::Ok)),
         )
         .await;
-        let resp = test::call_service(&mut srv, TestRequest::with_uri("/").to_request()).await;
+        let resp = test::call_service(&srv, TestRequest::with_uri("/").to_request()).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         // Cookie should be in the response.
@@ -673,33 +668,33 @@ mod tests {
             HttpResponse::Ok()
         }
 
-        let mut srv = test::init_service(
+        let srv = test::init_service(
             App::new()
                 .wrap(CsrfMiddleware::<StdRng>::new())
                 .service(test_route),
         )
         .await;
 
-        let resp = test::call_service(&mut srv, TestRequest::post().uri("/").to_request()).await;
+        let resp = test::call_service(&srv, TestRequest::post().uri("/").to_request()).await;
         assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     /// Will use double submit method.
     #[tokio::test]
     async fn double_submit_correct_token() {
-        let mut srv = test::init_service(
+        let srv = test::init_service(
             App::new()
                 .wrap(CsrfMiddleware::<StdRng>::new().set_cookie(Method::GET, "/"))
                 .service(
                     web::resource("/")
-                        .route(web::get().to(|| HttpResponse::Ok()))
-                        .route(web::post().to(|| HttpResponse::Ok())),
+                        .route(web::get().to(HttpResponse::Ok))
+                        .route(web::post().to(HttpResponse::Ok)),
                 ),
         )
         .await;
 
         // First, let's get the token as a client.
-        let resp = test::call_service(&mut srv, TestRequest::with_uri("/").to_request()).await;
+        let resp = test::call_service(&srv, TestRequest::with_uri("/").to_request()).await;
 
         let token = get_token_from_resp(&resp);
         let cookie = get_cookie_from_resp(&resp);
@@ -711,23 +706,23 @@ mod tests {
             .insert_header((DEFAULT_CSRF_TOKEN_NAME, token))
             .to_request();
 
-        let resp = test::call_service(&mut srv, req).await;
+        let resp = test::call_service(&srv, req).await;
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]
     async fn domain_attribute_is_set() {
-        let mut srv = test::init_service(
+        let srv = test::init_service(
             App::new()
                 .wrap(
                     CsrfMiddleware::<StdRng>::new()
                         .set_cookie(Method::GET, "/")
                         .domain("example.com"),
                 )
-                .service(web::resource("/").to(|| HttpResponse::Ok())),
+                .service(web::resource("/").to(HttpResponse::Ok)),
         )
         .await;
-        let resp = test::call_service(&mut srv, TestRequest::with_uri("/").to_request()).await;
+        let resp = test::call_service(&srv, TestRequest::with_uri("/").to_request()).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         assert_eq!(get_cookie_domain_from_resp(&resp), "example.com");
@@ -735,19 +730,19 @@ mod tests {
 
     #[tokio::test]
     async fn path_info_is_set() {
-        let mut srv = test::init_service(
+        let srv = test::init_service(
             App::new()
                 .wrap(CsrfMiddleware::<StdRng>::new().set_cookie(Method::GET, "/{id}"))
                 .service(
                     web::resource("/{id}")
-                        .route(web::get().to(|| HttpResponse::Ok()))
-                        .route(web::post().to(|| HttpResponse::Ok())),
+                        .route(web::get().to(HttpResponse::Ok))
+                        .route(web::post().to(HttpResponse::Ok)),
                 ),
         )
         .await;
 
         // First, let's get the token as a client.
-        let resp = test::call_service(&mut srv, TestRequest::with_uri("/1").to_request()).await;
+        let resp = test::call_service(&srv, TestRequest::with_uri("/1").to_request()).await;
 
         let token = get_token_from_resp(&resp);
         let cookie = get_cookie_from_resp(&resp);
@@ -759,7 +754,7 @@ mod tests {
             .insert_header((DEFAULT_CSRF_TOKEN_NAME, token))
             .to_request();
 
-        let resp = test::call_service(&mut srv, req).await;
+        let resp = test::call_service(&srv, req).await;
         assert_eq!(resp.status(), StatusCode::OK);
     }
 }
