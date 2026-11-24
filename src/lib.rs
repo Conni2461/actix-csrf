@@ -172,6 +172,7 @@ use actix_web::http::{Method, StatusCode};
 use actix_web::{HttpMessage, HttpResponse, ResponseError};
 use cookie::{Cookie, SameSite};
 use extractor::CsrfCookieConfig;
+use rand::rngs::SysRng;
 use rand::SeedableRng;
 use tracing::{error, warn};
 
@@ -422,7 +423,7 @@ impl<Rng: TokenRng + SeedableRng> Default for CsrfMiddleware<Rng> {
 impl<S, Rng> Transform<S, ServiceRequest> for CsrfMiddleware<Rng>
 where
     S: Service<ServiceRequest, Response = ServiceResponse>,
-    Rng: TokenRng + Clone,
+    Rng: TokenRng + SeedableRng,
 {
     type Response = ServiceResponse;
     type Error = S::Error;
@@ -433,7 +434,7 @@ where
     fn new_transform(&self, service: S) -> Self::Future {
         future::ready(Ok(CsrfMiddlewareImpl {
             service,
-            inner: self.inner.clone(),
+            inner: self.inner.fork(),
         }))
     }
 }
@@ -461,7 +462,23 @@ struct Inner<Rng> {
 
 impl<Rng: TokenRng + SeedableRng> Default for Inner<Rng> {
     fn default() -> Self {
-        Self::with_rng(Rng::from_os_rng())
+        Self::with_rng(Rng::try_from_rng(&mut SysRng).expect("failed to seed RNG from the OS"))
+    }
+}
+
+impl<Rng: TokenRng + SeedableRng> Inner<Rng> {
+    /// Clones the config, but seeds a new RNG from ours so no two services share RNG state.
+    fn fork(&self) -> Self {
+        Self {
+            rng: RefCell::new(Rng::from_rng(&mut *self.rng.borrow_mut())),
+            cookie_name: Rc::clone(&self.cookie_name),
+            http_only: self.http_only,
+            same_site: self.same_site,
+            secure: self.secure,
+            domain: self.domain.clone(),
+            csrf_enabled: self.csrf_enabled,
+            set_cookie: self.set_cookie.clone(),
+        }
     }
 }
 

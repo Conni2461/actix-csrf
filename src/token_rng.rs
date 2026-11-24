@@ -2,19 +2,18 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use rand::{CryptoRng, RngCore, TryRngCore};
+use rand::CryptoRng;
 
 /// Used to generate CSRF tokens.
 ///
 /// This trait is used to generate a token that can be used as a CSRF token. It
 /// is implemented for all CSRNG (Cryptographically Secure RNG) types. This
-/// should not be implemented directly; instead, implement [`CryptoRng`] and
-/// [`RngCore`] instead.
+/// should not be implemented directly; instead, implement [`CryptoRng`].
 ///
 /// Implementors of this trait should generate a token that's difficult to
 /// guess and is safe to store as a cookie. For blanket implementations, this
 /// is 32 bytes of random data, encoded as base64 without padding.
-pub trait TokenRng: CryptoRng + TryRngCore {
+pub trait TokenRng: CryptoRng {
     /// Generates a CSRF token.
     ///
     /// # Errors
@@ -23,7 +22,7 @@ pub trait TokenRng: CryptoRng + TryRngCore {
     fn generate_token(&mut self) -> Result<String, Self::Error>;
 }
 
-impl<Rng: CryptoRng + RngCore + TryRngCore> TokenRng for Rng {
+impl<Rng: CryptoRng> TokenRng for Rng {
     fn generate_token(&mut self) -> Result<String, Self::Error> {
         let mut buf = [0; 32];
         self.try_fill_bytes(&mut buf)?;
